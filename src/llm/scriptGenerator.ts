@@ -1,24 +1,7 @@
 import { z } from 'zod';
-import { env } from '../config/env.js';
 import { logger } from '../core/logger.js';
 import type { GeneratedScript } from '../types/pipeline.js';
-import { AnthropicProvider } from './providers/anthropic.js';
 import { GeminiProvider } from './providers/gemini.js';
-import type { LLMProvider } from './providers/types.js';
-
-async function getIdeaProvider(): Promise<LLMProvider> {
-  switch (env.IDEA_LLM_PROVIDER) {
-    case 'gemini':
-      return new GeminiProvider();
-    case 'anthropic':
-      return new AnthropicProvider();
-    case 'openai': {
-      // Lazy import so the openai package/key is only required if explicitly selected.
-      const { ideaLlm } = await import('./providers/openai.js');
-      return ideaLlm;
-    }
-  }
-}
 
 const sceneSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -71,34 +54,14 @@ function extractJson(text: string): unknown {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-function getDetailProvider(): LLMProvider {
-  return env.DETAIL_LLM_PROVIDER === 'gemini' ? new GeminiProvider() : new AnthropicProvider();
-}
-
-// The "other" provider is used as a fallback if the primary detail provider fails.
-function getDetailFallbackProvider(): LLMProvider {
-  return env.DETAIL_LLM_PROVIDER === 'gemini' ? new AnthropicProvider() : new GeminiProvider();
-}
-
 export async function generateScript(): Promise<GeneratedScript> {
-  const ideaProvider = await getIdeaProvider();
-  const idea = await ideaProvider.generate(IDEA_PROMPT);
-  logger.info({ idea, provider: ideaProvider.name }, 'raw idea generated');
+  const gemini = new GeminiProvider();
 
-  const detailer = getDetailProvider();
+  const idea = await gemini.generate(IDEA_PROMPT);
+  logger.info({ idea, provider: gemini.name }, 'raw idea generated');
+
   const prompt = detailPrompt(idea);
-
-  let raw: string;
-  try {
-    raw = await detailer.generate(prompt);
-  } catch (error) {
-    const fallback = getDetailFallbackProvider();
-    logger.warn(
-      { err: error, provider: detailer.name, fallback: fallback.name },
-      'detail provider failed, falling back to secondary LLM',
-    );
-    raw = await fallback.generate(prompt);
-  }
+  const raw = await gemini.generate(prompt);
 
   const parsed = scriptSchema.parse(extractJson(raw));
   const scenes = parsed.scenes.map((scene, index) => ({ ...scene, index }));
