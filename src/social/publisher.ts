@@ -1,10 +1,10 @@
-import { env } from '../config/env.js';
+import { activeNetworks, env } from '../config/env.js';
 import { logger } from '../core/logger.js';
 import { publishViaPostiz, uploadToPostiz } from '../hosting/postiz.client.js';
 import type { Platform, PublishOutcome } from '../types/pipeline.js';
 import { PLATFORMS } from '../types/pipeline.js';
 
-const INTEGRATION_MAP: Record<Platform, string> = {
+const ALL_INTEGRATIONS: Record<Platform, string> = {
   tiktok: env.POSTIZ_INTEGRATION_TIKTOK,
   linkedin: env.POSTIZ_INTEGRATION_LINKEDIN,
   facebook: env.POSTIZ_INTEGRATION_FACEBOOK,
@@ -16,6 +16,11 @@ const INTEGRATION_MAP: Record<Platform, string> = {
   pinterest: env.POSTIZ_INTEGRATION_PINTEREST,
 };
 
+// Only publish to the networks explicitly enabled via POSTIZ_ACTIVE_NETWORKS.
+const INTEGRATION_MAP: Partial<Record<Platform, string>> = Object.fromEntries(
+  Object.entries(ALL_INTEGRATIONS).filter(([platform]) => activeNetworks.includes(platform)),
+);
+
 const idToNetwork = Object.fromEntries(
   Object.entries(INTEGRATION_MAP).map(([name, id]) => [id, name]),
 );
@@ -24,7 +29,7 @@ export async function publishToAllNetworks(
   mediaId: string,
   caption: string,
 ): Promise<{ outcomes: PublishOutcome[]; links: string[]; errors: string[] }> {
-  const results = await publishViaPostiz(mediaId, caption, Object.values(INTEGRATION_MAP));
+  const results = await publishViaPostiz(mediaId, caption, Object.values(INTEGRATION_MAP) as string[]);
 
   const settled = await Promise.allSettled(
     results.map(async (result) => {
