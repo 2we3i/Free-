@@ -7,22 +7,16 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.string().default('info'),
 
-  OPENAI_API_KEY: z.string().optional().default(''),
-  OPENAI_MODEL: z.string().default('gpt-5'),
-  OPENAI_DETAIL_MODEL: z.string().default('gpt-5'),
-  IDEA_LLM_PROVIDER: z.enum(['gemini', 'anthropic', 'openai']).default('gemini'),
-  DETAIL_LLM_PROVIDER: z.enum(['anthropic', 'gemini']).default('anthropic'),
-  ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
-  ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-20250514'),
+  // Gemini handles all text generation (idea + scene breakdown).
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
   GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
 
-  WAVESPEED_API_KEY: z.string().min(1),
-  WAVESPEED_BASE_URL: z.string().url().default('https://api.wavespeed.ai'),
-  WAVESPEED_MODEL: z.string().min(1),
-  WAVESPEED_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
-  WAVESPEED_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  // Veo (via the Gemini API) handles video clip generation.
+  VEO_MODEL: z.string().default('veo-3.1-fast-generate-preview'),
+  VEO_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
+  VEO_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
 
+  // Fal is kept only for audio generation and final stitching (Veo does neither).
   FAL_KEY: z.string().min(1),
   FAL_AUDIO_MODEL: z.string().min(1),
   FAL_STITCH_MODEL: z.string().min(1),
