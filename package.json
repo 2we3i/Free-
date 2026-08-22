@@ -13,7 +13,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@google/generative-ai": "^0.24.0",
     "axios": "^1.8.4",
     "cockatiel": "^3.2.1",
@@ -22,7 +21,6 @@
     "google-spreadsheet": "^4.1.4",
     "grammy": "^1.35.0",
     "node-cron": "^3.0.3",
-    "openai": "^4.89.0",
     "pino": "^9.6.0",
     "zod": "^3.24.2"
   },
