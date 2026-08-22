@@ -3,96 +3,88 @@ import { logger } from '../core/logger.js';
 import { pollUntil } from '../core/poll.js';
 import { withRetry } from '../core/retry.js';
 import { createHttpClient } from '../http/client.js';
+import { uploadBufferToFal } from './falStorage.js';
 import type { MediaAsset, Scene } from '../types/pipeline.js';
 
-const http = createHttpClient('wavespeed', {
-  baseURL: env.WAVESPEED_BASE_URL,
-  headers: {
-    Authorization: `Bearer ${env.WAVESPEED_API_KEY}`,
-    'Content-Type': 'application/json',
-  },
+// Veo, accessed through the Gemini API. Docs: https://ai.google.dev/gemini-api/docs/veo
+const http = createHttpClient('veo', {
+  baseURL: 'https://generativelanguage.googleapis.com/v1beta',
+  headers: { 'Content-Type': 'application/json' },
 });
 
-interface WavespeedCreateResponse {
-  data?: {
-    id?: string;
-    status?: string;
-    outputs?: string[];
-    output?: string | string[];
+interface VeoOperation {
+  name: string;
+  done?: boolean;
+  error?: { message?: string };
+  response?: {
+    generateVideoResponse?: {
+      generatedSamples?: Array<{ video?: { uri?: string } }>;
+    };
   };
-  id?: string;
-  status?: string;
-  outputs?: string[];
 }
 
-interface WavespeedStatusResponse {
-  data?: {
-    id?: string;
-    status?: string;
-    outputs?: string[];
-    output?: string | string[];
-    error?: string;
-  };
-  status?: string;
-  outputs?: string[];
-  error?: string;
+async function startVeoGeneration(scene: Scene): Promise<VeoOperation> {
+  const response = await withRetry(async () => {
+    return http.post<VeoOperation>(
+      `/models/${env.VEO_MODEL}:generateVideos?key=${env.GEMINI_API_KEY}`,
+      {
+        instances: [{ prompt: scene.visualPrompt }],
+        parameters: { durationSeconds: Math.round(scene.durationSec) },
+      },
+    );
+  }, `veo:create:${scene.index}`);
+  return response.data;
 }
 
-function firstOutput(payload: WavespeedCreateResponse | WavespeedStatusResponse): string | undefined {
-  const data = 'data' in payload ? payload.data : undefined;
-  const outputs = data?.outputs ?? ('outputs' in payload ? payload.outputs : undefined);
-  if (Array.isArray(outputs) && outputs[0]) return outputs[0];
-  const output = data?.output;
-  if (typeof output === 'string') return output;
-  if (Array.isArray(output) && output[0]) return output[0];
-  return undefined;
+async function pollVeoOperation(operationName: string, sceneIndex: number): Promise<string> {
+  return pollUntil<string>({
+    label: `veo scene ${sceneIndex}`,
+    intervalMs: env.VEO_POLL_INTERVAL_MS,
+    timeoutMs: env.VEO_POLL_TIMEOUT_MS,
+    check: async () => {
+      const status = await withRetry(async () => {
+        const response = await http.get<VeoOperation>(`/${operationName}?key=${env.GEMINI_API_KEY}`);
+        return response.data;
+      }, `veo:poll:${sceneIndex}`);
+
+      if (status.error) {
+        throw new Error(status.error.message ?? `Veo scene ${sceneIndex} failed`);
+      }
+      if (!status.done) {
+        return { done: false };
+      }
+      const uri = status.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+      if (!uri) {
+        throw new Error(`Veo scene ${sceneIndex} completed without a video URI`);
+      }
+      return { done: true, value: uri };
+    },
+  });
 }
 
-function jobId(payload: WavespeedCreateResponse): string | undefined {
-  return payload.data?.id ?? payload.id;
-}
-
-function normalizeStatus(payload: WavespeedStatusResponse): string {
-  return (payload.data?.status ?? payload.status ?? '').toLowerCase();
+async function downloadVeoFile(fileUri: string): Promise<Buffer> {
+  // Veo file URIs require the API key as a query param to download.
+  const separator = fileUri.includes('?') ? '&' : '?';
+  const response = await http.get<ArrayBuffer>(`${fileUri}${separator}key=${env.GEMINI_API_KEY}`, {
+    responseType: 'arraybuffer',
+    baseURL: '',
+  });
+  return Buffer.from(response.data);
 }
 
 async function generateOneClip(scene: Scene): Promise<MediaAsset> {
-  const created = await withRetry(async () => {
-    const response = await http.post<WavespeedCreateResponse>(`/api/v3/${env.WAVESPEED_MODEL}`, {
-      prompt: scene.visualPrompt,
-      duration: scene.durationSec,
-    });
-    return response.data;
-  }, `wavespeed:create:${scene.index}`);
+  const operation = await startVeoGeneration(scene);
+  const fileUri = operation.done
+    ? operation.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
+    : await pollVeoOperation(operation.name, scene.index);
 
-  const id = jobId(created);
-  const immediate = firstOutput(created);
-  if (immediate) {
-    return { sceneIndex: scene.index, url: immediate };
-  }
-  if (!id) {
-    throw new Error(`Wavespeed did not return a prediction id for scene ${scene.index}`);
+  if (!fileUri) {
+    throw new Error(`Veo did not return a video for scene ${scene.index}`);
   }
 
-  const url = await pollUntil<string>({
-    label: `wavespeed scene ${scene.index}`,
-    intervalMs: env.WAVESPEED_POLL_INTERVAL_MS,
-    timeoutMs: env.WAVESPEED_POLL_TIMEOUT_MS,
-    check: async () => {
-      const status = await withRetry(async () => {
-        const response = await http.get<WavespeedStatusResponse>(`/api/v3/predictions/${id}/result`);
-        return response.data;
-      }, `wavespeed:poll:${scene.index}`);
-      const state = normalizeStatus(status);
-      const output = firstOutput(status);
-      if (output) return { done: true, value: output };
-      if (['failed', 'error', 'cancelled'].includes(state)) {
-        throw new Error(status.data?.error ?? status.error ?? `Wavespeed scene ${scene.index} failed`);
-      }
-      return { done: false };
-    },
-  });
-
+  // Fal's stitch step needs a public URL, so re-host the Veo clip on Fal's CDN.
+  const buffer = await downloadVeoFile(fileUri);
+  const url = await uploadBufferToFal(buffer, `scene-${scene.index}.mp4`, 'video/mp4');
   return { sceneIndex: scene.index, url };
 }
 
