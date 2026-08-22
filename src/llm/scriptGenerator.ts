@@ -4,8 +4,21 @@ import { logger } from '../core/logger.js';
 import type { GeneratedScript } from '../types/pipeline.js';
 import { AnthropicProvider } from './providers/anthropic.js';
 import { GeminiProvider } from './providers/gemini.js';
-import { ideaLlm, openaiDetailLlm } from './providers/openai.js';
 import type { LLMProvider } from './providers/types.js';
+
+async function getIdeaProvider(): Promise<LLMProvider> {
+  switch (env.IDEA_LLM_PROVIDER) {
+    case 'gemini':
+      return new GeminiProvider();
+    case 'anthropic':
+      return new AnthropicProvider();
+    case 'openai': {
+      // Lazy import so the openai package/key is only required if explicitly selected.
+      const { ideaLlm } = await import('./providers/openai.js');
+      return ideaLlm;
+    }
+  }
+}
 
 const sceneSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -58,37 +71,33 @@ function extractJson(text: string): unknown {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-function getDetailProvider(): LLMProvider | null {
-  if (env.DETAIL_LLM_PROVIDER === 'anthropic' && env.ANTHROPIC_API_KEY) {
-    return new AnthropicProvider();
-  }
-  if (env.DETAIL_LLM_PROVIDER === 'gemini' && env.GEMINI_API_KEY) {
-    return new GeminiProvider();
-  }
-  return null;
+function getDetailProvider(): LLMProvider {
+  return env.DETAIL_LLM_PROVIDER === 'gemini' ? new GeminiProvider() : new AnthropicProvider();
+}
+
+// The "other" provider is used as a fallback if the primary detail provider fails.
+function getDetailFallbackProvider(): LLMProvider {
+  return env.DETAIL_LLM_PROVIDER === 'gemini' ? new AnthropicProvider() : new GeminiProvider();
 }
 
 export async function generateScript(): Promise<GeneratedScript> {
-  const idea = await ideaLlm.generate(IDEA_PROMPT);
-  logger.info({ idea }, 'raw idea generated');
+  const ideaProvider = await getIdeaProvider();
+  const idea = await ideaProvider.generate(IDEA_PROMPT);
+  logger.info({ idea, provider: ideaProvider.name }, 'raw idea generated');
 
   const detailer = getDetailProvider();
   const prompt = detailPrompt(idea);
 
   let raw: string;
-  if (detailer) {
-    try {
-      raw = await detailer.generate(prompt);
-    } catch (error) {
-      logger.warn({ err: error, provider: detailer.name }, 'detail provider failed, falling back to GPT-5');
-      raw = await openaiDetailLlm.generate(prompt);
-    }
-  } else {
+  try {
+    raw = await detailer.generate(prompt);
+  } catch (error) {
+    const fallback = getDetailFallbackProvider();
     logger.warn(
-      { configured: env.DETAIL_LLM_PROVIDER },
-      'second LLM provider is not configured, using GPT-5 for scene breakdown',
+      { err: error, provider: detailer.name, fallback: fallback.name },
+      'detail provider failed, falling back to secondary LLM',
     );
-    raw = await openaiDetailLlm.generate(prompt);
+    raw = await fallback.generate(prompt);
   }
 
   const parsed = scriptSchema.parse(extractJson(raw));
