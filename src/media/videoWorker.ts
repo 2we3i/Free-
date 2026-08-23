@@ -7,9 +7,14 @@ import { uploadBufferToFal } from './falStorage.js';
 import type { MediaAsset, Scene } from '../types/pipeline.js';
 
 // Veo, accessed through the Gemini API. Docs: https://ai.google.dev/gemini-api/docs/veo
+// Uses the long-running "predictLongRunning" REST method, authenticated via the
+// x-goog-api-key header (not a ?key= query param).
 const http = createHttpClient('veo', {
   baseURL: 'https://generativelanguage.googleapis.com/v1beta',
-  headers: { 'Content-Type': 'application/json' },
+  headers: {
+    'Content-Type': 'application/json',
+    'x-goog-api-key': env.GEMINI_API_KEY,
+  },
 });
 
 interface VeoOperation {
@@ -25,13 +30,10 @@ interface VeoOperation {
 
 async function startVeoGeneration(scene: Scene): Promise<VeoOperation> {
   const response = await withRetry(async () => {
-    return http.post<VeoOperation>(
-      `/models/${env.VEO_MODEL}:generateVideos?key=${env.GEMINI_API_KEY}`,
-      {
-        instances: [{ prompt: scene.visualPrompt }],
-        parameters: { durationSeconds: Math.round(scene.durationSec) },
-      },
-    );
+    return http.post<VeoOperation>(`/models/${env.VEO_MODEL}:predictLongRunning`, {
+      instances: [{ prompt: scene.visualPrompt }],
+      parameters: { durationSeconds: Math.round(scene.durationSec) },
+    });
   }, `veo:create:${scene.index}`);
   return response.data;
 }
@@ -43,7 +45,8 @@ async function pollVeoOperation(operationName: string, sceneIndex: number): Prom
     timeoutMs: env.VEO_POLL_TIMEOUT_MS,
     check: async () => {
       const status = await withRetry(async () => {
-        const response = await http.get<VeoOperation>(`/${operationName}?key=${env.GEMINI_API_KEY}`);
+        // operationName already includes the "models/..." prefix per the API response.
+        const response = await http.get<VeoOperation>(`/${operationName}`);
         return response.data;
       }, `veo:poll:${sceneIndex}`);
 
@@ -63,9 +66,8 @@ async function pollVeoOperation(operationName: string, sceneIndex: number): Prom
 }
 
 async function downloadVeoFile(fileUri: string): Promise<Buffer> {
-  // Veo file URIs require the API key as a query param to download.
-  const separator = fileUri.includes('?') ? '&' : '?';
-  const response = await http.get<ArrayBuffer>(`${fileUri}${separator}key=${env.GEMINI_API_KEY}`, {
+  // Veo file URIs are absolute and require the same x-goog-api-key header to download.
+  const response = await http.get<ArrayBuffer>(fileUri, {
     responseType: 'arraybuffer',
     baseURL: '',
   });
