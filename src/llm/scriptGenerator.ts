@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { logger } from '../core/logger.js';
+import { fetchTrendDigest } from '../trends/trendSearch.js';
 import type { GeneratedScript } from '../types/pipeline.js';
 import { GeminiProvider } from './providers/gemini.js';
 
@@ -9,33 +10,23 @@ const scriptSchema = z.object({
   videoPrompt: z.string().min(1),
 });
 
-// Step 1: use Google Search grounding to find what's actually trending today in the
-// EU and RU regions, so the idea is based on real, current material rather than
-// the model's static training data.
-const TRENDS_PROMPT = `Search for what is trending, viral, or being widely discussed today
-specifically in the EU (Europe) and RU (Russia/Russian-speaking) regions/internet — memes,
-viral formats, jokes, or cultural moments that are currently "forced"/being reposted a lot.
-
-Return a short plain-text list (5-8 bullet points) of the most relevant current trends/memes
-for these two regions, with a one-line note on why each is currently popular. Be specific
-(name the meme/format/reference), not generic.`;
-
-// Step 2: turn the current trends into one short-video concept.
+// Turn today's trend digest (from free web search) into a short-video concept.
 function ideaPrompt(trends: string): string {
   return `You are a short-form video creative director making content for EU and RU audiences.
 
-Here are today's trending memes/topics in those regions:
+Here is a digest of today's web search results about trending topics/memes in those regions:
 ${trends}
 
-Pick the single best trend/meme from this list (or a clever combination) and turn it into
-one original short-video concept (8-15 seconds) suitable for TikTok, Reels, and Shorts.
-Return plain text only: 3-5 sentences describing the hook, the joke/reference being used,
-the visual style, and the payoff. Make it clear which specific trend/meme it's based on.`;
+Pick the single best trend/meme suggested by this digest (or a clever combination) and turn it
+into one original short-video concept (8-15 seconds) suitable for TikTok, Reels, and Shorts.
+If the digest is thin or unclear, use your best general knowledge of current EU/RU internet
+culture instead. Return plain text only: 3-5 sentences describing the hook, the joke/reference
+being used, the visual style, and the payoff. Make it clear which specific trend/meme it's based on.`;
 }
 
-// Step 3: turn the idea into one self-contained prompt for a single-shot video+audio
-// generation (meant to be pasted into a tool like the Gemini app's video generator,
-// which produces one finished clip with native audio in one go — no separate scenes).
+// Turn the idea into one self-contained prompt for a single-shot video+audio generation
+// (meant to be pasted into a tool like the Gemini app's video generator, which produces
+// one finished clip with native audio in one go — no separate scenes).
 function videoPromptPrompt(idea: string): string {
   return `Turn this short-video idea into ONE single, self-contained prompt for an AI video
 generator that produces an 8-15 second clip with native audio (dialogue/sound effects/music)
@@ -66,8 +57,8 @@ function extractJson(text: string): unknown {
 export async function generateScript(): Promise<GeneratedScript> {
   const gemini = new GeminiProvider();
 
-  const trends = await gemini.generate(TRENDS_PROMPT, { useSearchGrounding: true });
-  logger.info({ trends }, 'fetched current EU/RU trends via search grounding');
+  const trends = await fetchTrendDigest();
+  logger.info({ trends }, 'fetched current EU/RU trend digest via free web search');
 
   const idea = await gemini.generate(ideaPrompt(trends));
   logger.info({ idea }, 'idea generated from trends');
