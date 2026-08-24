@@ -48,7 +48,7 @@ export async function uploadToPostiz(buffer: Buffer, filename: string): Promise<
   return withRetry(async () => {
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(buffer)], { type: 'video/mp4' }), filename);
-    const { data } = await http.post<UploadResponse>('/public/v1/upload', form, {
+    const { data } = await http.post<UploadResponse>('/api/public/v1/upload', form, {
       timeout: 180_000,
       maxBodyLength: Infinity,
       maxContentLength: Infinity,
@@ -71,7 +71,7 @@ export async function publishViaPostiz(
   integrationIds: string[],
 ): Promise<PostizPublishResult[]> {
   return withRetry(async () => {
-    const { data } = await http.post<PublishResponse>('/public/v1/posts', {
+    const { data } = await http.post<PublishResponse>('/api/public/v1/posts', {
       integrationIds,
       content: caption,
       media: [mediaId],
