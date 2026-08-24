@@ -11,17 +11,10 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY is required'),
   GEMINI_MODEL: z.string().default('gemini-2.0-flash'),
 
-  // Veo (via the Gemini API) handles video clip generation.
-  VEO_MODEL: z.string().default('veo-3.1-fast-generate-preview'),
-  VEO_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(10_000),
-  VEO_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
-
-  // Fal is kept only for audio generation and final stitching (Veo does neither).
-  FAL_KEY: z.string().min(1),
-  FAL_AUDIO_MODEL: z.string().min(1),
-  FAL_STITCH_MODEL: z.string().min(1),
-  FAL_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(4_000),
-  FAL_POLL_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  // Video is generated manually: the operator gets one prompt in Telegram, generates
+  // the clip themselves (e.g. in the Gemini app, which produces video with native audio
+  // in a single pass), and replies with the file. This is how long the pipeline waits.
+  MANUAL_CLIP_TIMEOUT_MS: z.coerce.number().int().positive().default(3_600_000),
 
   POSTIZ_BASE_URL: z.string().url(),
   POSTIZ_API_KEY: z.string().min(1),
