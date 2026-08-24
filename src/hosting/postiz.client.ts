@@ -25,12 +25,18 @@ export interface PostizPublishResult {
 
 interface UploadResponse {
   id?: string;
+  path?: string;
   url?: string;
   media_id?: string;
 }
 
 interface PublishResponse {
   results?: PostizPublishResult[];
+}
+
+export interface UploadedMedia {
+  id: string;
+  path: string;
 }
 
 function assertJsonResponse(data: unknown, context: string): void {
@@ -44,7 +50,7 @@ function assertJsonResponse(data: unknown, context: string): void {
   }
 }
 
-export async function uploadToPostiz(buffer: Buffer, filename: string): Promise<string> {
+export async function uploadToPostiz(buffer: Buffer, filename: string): Promise<UploadedMedia> {
   return withRetry(async () => {
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(buffer)], { type: 'video/mp4' }), filename);
@@ -55,19 +61,20 @@ export async function uploadToPostiz(buffer: Buffer, filename: string): Promise<
     });
     assertJsonResponse(data, '/public/v1/upload');
     const mediaId = data.id ?? data.media_id;
-    if (!mediaId) {
-      logger.error({ response: data }, 'Postiz upload response missing id/media_id field');
+    const path = data.path ?? data.url;
+    if (!mediaId || !path) {
+      logger.error({ response: data }, 'Postiz upload response missing id/path field');
       throw new Error(
-        `Postiz upload succeeded but no media id was returned. Response: ${JSON.stringify(data)}`,
+        `Postiz upload succeeded but id/path was missing. Response: ${JSON.stringify(data)}`,
       );
     }
-    return mediaId;
+    return { id: mediaId, path };
   }, 'postiz.upload');
 }
 
 interface PostizPostValue {
   content: string;
-  image?: Array<{ id: string }>;
+  image?: UploadedMedia[];
 }
 
 interface CreatePostPayload {
@@ -90,7 +97,7 @@ interface CreatePostResponseItem {
 }
 
 export async function publishViaPostiz(
-  mediaId: string,
+  media: UploadedMedia,
   caption: string,
   integrationIds: string[],
 ): Promise<PostizPublishResult[]> {
@@ -108,7 +115,7 @@ export async function publishViaPostiz(
       tags: [],
       posts: integrationIds.map((integrationId) => ({
         integration: { id: integrationId },
-        value: [{ content: caption, image: [{ id: mediaId }] }],
+        value: [{ content: caption, image: [media] }],
         settings: { title: safeTitle, type: 'public' },
       })),
     };
