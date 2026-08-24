@@ -1,7 +1,6 @@
 export const PIPELINE_STATUSES = [
   'GENERATING_SCRIPT',
-  'GENERATING_MEDIA',
-  'STITCHING',
+  'AWAITING_CLIP',
   'AWAITING_APPROVAL',
   'PUBLISHING',
   'DONE',
@@ -25,22 +24,12 @@ export const PLATFORMS = [
 
 export type Platform = (typeof PLATFORMS)[number];
 
-export interface Scene {
-  index: number;
-  visualPrompt: string;
-  audioPrompt: string;
-  durationSec: number;
-}
-
 export interface GeneratedScript {
   idea: string;
   caption: string;
-  scenes: Scene[];
-}
-
-export interface MediaAsset {
-  sceneIndex: number;
-  url: string;
+  // Single self-contained prompt for the whole clip (video + native audio),
+  // meant to be pasted into the Gemini app's video generator.
+  videoPrompt: string;
 }
 
 export interface PublishOutcome {
