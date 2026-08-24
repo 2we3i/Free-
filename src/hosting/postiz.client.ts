@@ -1,10 +1,11 @@
 import { env } from '../config/env.js';
+import { logger } from '../core/logger.js';
 import { withRetry } from '../core/retry.js';
 import { createHttpClient } from '../http/client.js';
 
 const http = createHttpClient('postiz', {
   baseURL: env.POSTIZ_BASE_URL,
-  headers: { Authorization: `Bearer ${env.POSTIZ_API_KEY}` },
+  headers: { Authorization: env.POSTIZ_API_KEY },
   timeout: 60_000,
 });
 
@@ -36,7 +37,10 @@ export async function uploadToPostiz(buffer: Buffer, filename: string): Promise<
     });
     const mediaId = data.id ?? data.media_id;
     if (!mediaId) {
-      throw new Error('Postiz upload succeeded but no media id was returned');
+      logger.error({ response: data }, 'Postiz upload response missing id/media_id field');
+      throw new Error(
+        `Postiz upload succeeded but no media id was returned. Response: ${JSON.stringify(data)}`,
+      );
     }
     return mediaId;
   }, 'postiz.upload');
