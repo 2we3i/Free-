@@ -1,6 +1,6 @@
 import { activeNetworks, env } from '../config/env.js';
 import { logger } from '../core/logger.js';
-import { publishViaPostiz, uploadToPostiz } from '../hosting/postiz.client.js';
+import { publishViaPostiz, uploadToPostiz, type UploadedMedia } from '../hosting/postiz.client.js';
 import type { Platform, PublishOutcome } from '../types/pipeline.js';
 import { PLATFORMS } from '../types/pipeline.js';
 
@@ -26,10 +26,10 @@ const idToNetwork = Object.fromEntries(
 );
 
 export async function publishToAllNetworks(
-  mediaId: string,
+  media: UploadedMedia,
   caption: string,
 ): Promise<{ outcomes: PublishOutcome[]; links: string[]; errors: string[] }> {
-  const results = await publishViaPostiz(mediaId, caption, Object.values(INTEGRATION_MAP) as string[]);
+  const results = await publishViaPostiz(media, caption, Object.values(INTEGRATION_MAP) as string[]);
 
   const settled = await Promise.allSettled(
     results.map(async (result) => {
@@ -66,9 +66,9 @@ export async function uploadAndPublish(
   caption: string,
   filename: string,
 ): Promise<{ outcomes: PublishOutcome[]; links: string[]; errors: string[]; mediaId: string }> {
-  const mediaId = await uploadToPostiz(buffer, filename);
-  const published = await publishToAllNetworks(mediaId, caption);
-  return { ...published, mediaId };
+  const media = await uploadToPostiz(buffer, filename);
+  const published = await publishToAllNetworks(media, caption);
+  return { ...published, mediaId: media.id };
 }
 
 export { INTEGRATION_MAP, PLATFORMS };
