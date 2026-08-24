@@ -83,10 +83,9 @@ interface CreatePostPayload {
 }
 
 interface CreatePostResponseItem {
-  id?: string;
-  integration?: { id?: string };
-  releaseURL?: string;
   postId?: string;
+  integration?: string;
+  releaseURL?: string;
   [key: string]: unknown;
 }
 
@@ -124,9 +123,9 @@ export async function publishViaPostiz(
     // per-integration result type regardless of which shape comes back.
     if (Array.isArray(data)) {
       return data.map((item, index) => ({
-        integrationId: item.integration?.id ?? integrationIds[index] ?? 'unknown',
+        integrationId: item.integration ?? integrationIds[index] ?? 'unknown',
         status: 'success' as const,
-        postUrl: typeof item.releaseURL === 'string' ? item.releaseURL : undefined,
+        postUrl: typeof item.releaseURL === 'string' ? item.releaseURL : item.postId,
       }));
     }
 
