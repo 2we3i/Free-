@@ -2,9 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { env } from '../config/env.js';
 import { updateRunRow, createRunRow } from '../db/sheets.client.js';
 import { generateScript } from '../llm/scriptGenerator.js';
-import { generateSounds } from '../media/audioWorker.js';
-import { stitchAndDownload } from '../media/stitcher.js';
-import { generateClips } from '../media/videoWorker.js';
+import { getManualClip } from '../media/videoWorker.js';
 import { uploadAndPublish } from '../social/publisher.js';
 import { alertDeveloper } from '../telegram/alerts.js';
 import { markApprovalProcessed, sendApprovalRequest } from '../telegram/bot.js';
@@ -25,27 +23,17 @@ export async function runPipeline(): Promise<string> {
   try {
     const script = await generateScript();
     await createRunRow(runId, script.idea);
-    await updateRunRow(runId, { Status: 'GENERATING_MEDIA', Idea: script.idea });
+    await updateRunRow(runId, { Status: 'AWAITING_CLIP', Idea: script.idea });
 
-    const [clips, sounds] = await Promise.all([
-      generateClips(script.scenes),
-      generateSounds(script.scenes),
-    ]);
-
-    await updateRunRow(runId, { Status: 'STITCHING' });
-    const stitched = await stitchAndDownload(
-      clips.map((clip) => clip.url),
-      sounds.map((sound) => sound.url),
-    );
-    await updateRunRow(runId, { Status: 'AWAITING_APPROVAL', Video_URL: stitched.url });
+    const clipBuffer = await getManualClip(runId, script.videoPrompt);
+    await updateRunRow(runId, { Status: 'AWAITING_APPROVAL' });
 
     const approval = waitForApproval(runId, env.APPROVAL_TIMEOUT_MS);
     await sendApprovalRequest({
       runId,
       idea: script.idea,
       caption: script.caption,
-      videoUrl: stitched.url,
-      videoBuffer: stitched.buffer,
+      videoBuffer: clipBuffer,
     });
     const decision = await approval;
     markApprovalProcessed(runId, decision);
@@ -57,7 +45,7 @@ export async function runPipeline(): Promise<string> {
     }
 
     await updateRunRow(runId, { Status: 'PUBLISHING' });
-    const published = await uploadAndPublish(stitched.buffer, script.caption, `${runId}.mp4`);
+    const published = await uploadAndPublish(clipBuffer, script.caption, `${runId}.mp4`);
 
     if (published.links.length === 0) {
       await updateRunRow(runId, {
@@ -65,7 +53,7 @@ export async function runPipeline(): Promise<string> {
         Post_Links: '',
         Error: published.errors.join(' | '),
       });
-      throw new Error(`All 9 networks failed: ${published.errors.join(' | ')}`);
+      throw new Error(`All networks failed: ${published.errors.join(' | ')}`);
     }
 
     await updateRunRow(runId, {
