@@ -65,21 +65,74 @@ export async function uploadToPostiz(buffer: Buffer, filename: string): Promise<
   }, 'postiz.upload');
 }
 
+interface PostizPostValue {
+  content: string;
+  image?: Array<{ id: string }>;
+}
+
+interface CreatePostPayload {
+  type: 'now' | 'schedule' | 'draft';
+  date: string;
+  shortLink: boolean;
+  tags: unknown[];
+  posts: Array<{
+    integration: { id: string };
+    value: PostizPostValue[];
+    settings: Record<string, unknown>;
+  }>;
+}
+
+interface CreatePostResponseItem {
+  id?: string;
+  integration?: { id?: string };
+  releaseURL?: string;
+  postId?: string;
+  [key: string]: unknown;
+}
+
 export async function publishViaPostiz(
   mediaId: string,
   caption: string,
   integrationIds: string[],
 ): Promise<PostizPublishResult[]> {
   return withRetry(async () => {
-    const { data } = await http.post<PublishResponse>('/api/public/v1/posts', {
-      integrationIds,
-      content: caption,
-      media: [mediaId],
-    });
+    // YouTube (and likely other networks) require network-specific settings on each post.
+    // title must be 2-100 chars; we derive it from the caption since we don't generate
+    // a separate title upstream.
+    const title = caption.replace(/\s+/g, ' ').trim().slice(0, 100) || 'Untitled';
+    const safeTitle = title.length >= 2 ? title : `${title} video`.slice(0, 100);
+
+    const payload: CreatePostPayload = {
+      type: 'now',
+      date: new Date().toISOString(),
+      shortLink: false,
+      tags: [],
+      posts: integrationIds.map((integrationId) => ({
+        integration: { id: integrationId },
+        value: [{ content: caption, image: [{ id: mediaId }] }],
+        settings: { title: safeTitle, type: 'public' },
+      })),
+    };
+
+    const { data } = await http.post<CreatePostResponseItem[] | { results?: PostizPublishResult[] }>(
+      '/api/public/v1/posts',
+      payload,
+    );
     assertJsonResponse(data, '/public/v1/posts');
+
+    // Postiz's create-post response shape varies by version; normalize it into our
+    // per-integration result type regardless of which shape comes back.
+    if (Array.isArray(data)) {
+      return data.map((item, index) => ({
+        integrationId: item.integration?.id ?? integrationIds[index] ?? 'unknown',
+        status: 'success' as const,
+        postUrl: typeof item.releaseURL === 'string' ? item.releaseURL : undefined,
+      }));
+    }
+
     const results = data.results;
     if (!Array.isArray(results) || results.length === 0) {
-      throw new Error('Postiz publish returned no per-integration results');
+      throw new Error(`Postiz publish returned an unrecognized response shape: ${JSON.stringify(data)}`);
     }
     return results;
   }, 'postiz.publish');
