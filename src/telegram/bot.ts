@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
 import { env } from '../config/env.js';
 import { logger } from '../core/logger.js';
-import { isApprovalPending, settleApproval } from '../core/runContext.js';
+import { isApprovalPending, isAwaitingClip, settleApproval, submitClip } from '../core/runContext.js';
 import type { ApprovalDecision } from '../types/pipeline.js';
 
 export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
@@ -70,15 +70,67 @@ bot.callbackQuery(/^(approve|cancel):.+/, async (ctx) => {
   );
 });
 
+// Receives the manually generated video clip for whichever run this chat is currently
+// expected to submit one for. The person just sends the finished video as a reply.
+bot.on(['message:video', 'message:document'], async (ctx) => {
+  const chatId = String(ctx.chat.id);
+  if (!isAwaitingClip(chatId)) {
+    return; // Not currently expecting a clip from this chat; ignore.
+  }
+
+  const file = ctx.message.video ?? ctx.message.document;
+  if (!file) return;
+
+  if (ctx.message.document && !(ctx.message.document.mime_type ?? '').startsWith('video/')) {
+    await ctx.reply('That file does not look like a video — please send an .mp4 clip.');
+    return;
+  }
+
+  try {
+    const telegramFile = await ctx.getFile();
+    const url = `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${telegramFile.file_path}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to download clip from Telegram: ${response.status}`);
+    }
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    const result = submitClip(chatId, buffer);
+    if (!result) {
+      await ctx.reply('No active run is waiting for a clip right now.');
+      return;
+    }
+
+    await ctx.reply(`✅ Clip received for run ${result.runId}. Continuing…`);
+  } catch (error) {
+    logger.error({ err: error, chatId }, 'failed to process incoming clip');
+    await ctx.reply('Something went wrong saving that clip — please try sending it again.');
+  }
+});
+
 bot.catch((err) => {
   logger.error({ err: err.error }, 'telegram bot error');
 });
+
+// Sends the single video-generation prompt to the operator so they can paste it into
+// a tool like the Gemini app and reply with the resulting clip (video + native audio).
+export async function sendVideoPrompt(runId: string, videoPrompt: string): Promise<void> {
+  const text = [
+    `🎬 Run ${runId}`,
+    '',
+    'Paste this into the video generator (e.g. Gemini app → Video):',
+    '',
+    videoPrompt,
+    '',
+    `Reply here with the finished clip. You have up to ${Math.round(env.MANUAL_CLIP_TIMEOUT_MS / 60_000)} minutes.`,
+  ].join('\n');
+  await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, text);
+}
 
 export async function sendApprovalRequest(options: {
   runId: string;
   idea: string;
   caption: string;
-  videoUrl: string;
   videoBuffer: Buffer;
 }): Promise<void> {
   const keyboard = new InlineKeyboard()
@@ -93,18 +145,20 @@ export async function sendApprovalRequest(options: {
     options.caption,
   ].join('\n');
 
-  if (options.videoBuffer.byteLength <= TELEGRAM_VIDEO_LIMIT) {
-    await bot.api.sendVideo(
+  if (options.videoBuffer.byteLength > TELEGRAM_VIDEO_LIMIT) {
+    await bot.api.sendMessage(
       env.TELEGRAM_ADMIN_CHAT_ID,
-      new InputFile(options.videoBuffer, `${options.runId}.mp4`),
-      { caption: text.slice(0, 1024), reply_markup: keyboard },
+      `${text}\n\n⚠️ Clip is larger than Telegram's ${TELEGRAM_VIDEO_LIMIT / 1024 / 1024}MB limit and cannot be previewed here.`,
+      { reply_markup: keyboard },
     );
     return;
   }
 
-  await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, `${text}\n\nVideo: ${options.videoUrl}`, {
-    reply_markup: keyboard,
-  });
+  await bot.api.sendVideo(
+    env.TELEGRAM_ADMIN_CHAT_ID,
+    new InputFile(options.videoBuffer, `${options.runId}.mp4`),
+    { caption: text.slice(0, 1024), reply_markup: keyboard },
+  );
 }
 
 export function markApprovalProcessed(runId: string, decision: ApprovalDecision): void {
