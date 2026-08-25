@@ -58,9 +58,23 @@ export async function createRunRow(runId: string, idea: string): Promise<void> {
 
 export async function updateRunRow(runId: string, patch: SheetRowPatch): Promise<void> {
   const worksheet = await getSheet();
-  await withRetry(() => worksheet.loadHeaderRow(), 'sheets:loadHeaderRow');
-  const rows = await withRetry(() => worksheet.getRows(), 'sheets:getRows');
-  const row = rows.find((item) => item.get('Run_ID') === runId);
+
+  // Google Sheets can briefly lag between a row being added and it showing up in a
+  // subsequent read, especially when update calls happen right after create. Retry
+  // the row lookup a few times before giving up.
+  let row: Awaited<ReturnType<typeof worksheet.getRows>>[number] | undefined;
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await withRetry(() => worksheet.loadHeaderRow(), 'sheets:loadHeaderRow');
+    const rows = await withRetry(() => worksheet.getRows(), 'sheets:getRows');
+    row = rows.find((item) => item.get('Run_ID') === runId);
+    if (row) break;
+    if (attempt < maxAttempts) {
+      logger.warn({ runId, attempt }, 'sheet row not found yet, retrying lookup');
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+  }
+
   if (!row) {
     throw new Error(`Sheet row for run ${runId} was not found`);
   }
@@ -68,6 +82,6 @@ export async function updateRunRow(runId: string, patch: SheetRowPatch): Promise
     if (value !== undefined) row.set(key, value);
   }
   row.set('Timestamp', new Date().toISOString());
-  await withRetry(() => row.save(), 'sheets:saveRow');
+  await withRetry(() => row!.save(), 'sheets:saveRow');
   logger.info({ runId, patch }, 'sheet row updated');
 }
