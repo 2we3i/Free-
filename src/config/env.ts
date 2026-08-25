@@ -40,8 +40,9 @@ const envSchema = z.object({
   GOOGLE_SHEETS_ID: z.string().min(1),
   GOOGLE_SHEETS_TAB: z.string().default('Runs'),
 
-  CRON_SCHEDULE: z.string().default('0 9 * * *'),
-  TZ: z.string().default('UTC'),
+  // Comma-separated list of cron expressions. Each one triggers a run independently.
+  CRON_SCHEDULE: z.string().default('0 12 * * *,0 17 * * *,0 21 * * *'),
+  TZ: z.string().default('Europe/Vilnius'),
 });
 
 export type Env = z.infer<typeof envSchema>;
