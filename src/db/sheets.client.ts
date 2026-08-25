@@ -56,6 +56,38 @@ export async function createRunRow(runId: string, idea: string): Promise<void> {
   logger.info({ runId }, 'sheet row created');
 }
 
+export interface CompletedRun {
+  runId: string;
+  idea: string;
+  postLinks: string;
+  timestamp: string;
+}
+
+// Returns all runs marked DONE whose Timestamp falls on today's date (in the given
+// timezone), for the end-of-day analytics report.
+export async function getTodaysDoneRuns(timezone: string): Promise<CompletedRun[]> {
+  const worksheet = await getSheet();
+  await withRetry(() => worksheet.loadHeaderRow(), 'sheets:loadHeaderRow');
+  const rows = await withRetry(() => worksheet.getRows(), 'sheets:getRows');
+
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: timezone }); // YYYY-MM-DD
+
+  return rows
+    .filter((row) => {
+      if (row.get('Status') !== 'DONE') return false;
+      const ts = row.get('Timestamp');
+      if (!ts) return false;
+      const rowKey = new Date(ts).toLocaleDateString('en-CA', { timeZone: timezone });
+      return rowKey === todayKey;
+    })
+    .map((row) => ({
+      runId: row.get('Run_ID') ?? '',
+      idea: row.get('Idea') ?? '',
+      postLinks: row.get('Post_Links') ?? '',
+      timestamp: row.get('Timestamp') ?? '',
+    }));
+}
+
 export async function updateRunRow(runId: string, patch: SheetRowPatch): Promise<void> {
   const worksheet = await getSheet();
 
