@@ -61,8 +61,20 @@ bot.command(['status', 'start'], async (ctx) => {
   await ctx.reply(
     isPipelineRunning()
       ? '⏳ A run is currently in progress.'
-      : 'Idle. Send /run to generate a new video prompt now.',
+      : 'Idle. Send /run to generate a new video prompt now, or /report for today\'s stats.',
   );
+});
+
+bot.command('report', async (ctx) => {
+  if (!ctx.chat || !isAuthorized(ctx.chat.id)) return;
+  await ctx.reply('📊 Fetching today\'s analytics…');
+  try {
+    const { sendDailyReport } = await import('../reporting/dailyReport.js');
+    await sendDailyReport();
+  } catch (error) {
+    logger.error({ err: error }, 'manual /report failed');
+    await ctx.reply('⚠️ Failed to generate the report — check the logs.');
+  }
 });
 
 bot.callbackQuery(/^(approve|cancel):.+/, async (ctx) => {
