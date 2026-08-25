@@ -42,6 +42,8 @@ const envSchema = z.object({
 
   // Comma-separated list of cron expressions. Each one triggers a run independently.
   CRON_SCHEDULE: z.string().default('0 12 * * *,0 17 * * *,0 21 * * *'),
+  // When to send the end-of-day analytics report (views/likes/comments) in Telegram.
+  DAILY_REPORT_CRON: z.string().default('0 23 * * *'),
   TZ: z.string().default('Europe/Vilnius'),
 });
 
