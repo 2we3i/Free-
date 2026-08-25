@@ -3,6 +3,7 @@ import { env } from '../config/env.js';
 import { isPipelineRunning, runPipeline } from '../core/pipeline.js';
 import { logger } from '../core/logger.js';
 import { alertDeveloper } from '../telegram/alerts.js';
+import { sendDailyReport } from '../reporting/dailyReport.js';
 
 function triggerScheduledRun(schedule: string): void {
   if (isPipelineRunning()) {
@@ -32,5 +33,23 @@ export function startScheduler(): void {
     cron.schedule(schedule, () => triggerScheduledRun(schedule), { timezone: env.TZ });
   }
 
-  logger.info({ schedules, tz: env.TZ }, 'scheduler started');
+  if (!cron.validate(env.DAILY_REPORT_CRON)) {
+    throw new Error(`Invalid DAILY_REPORT_CRON: "${env.DAILY_REPORT_CRON}"`);
+  }
+  cron.schedule(
+    env.DAILY_REPORT_CRON,
+    () => {
+      logger.info('cron triggered daily report');
+      void sendDailyReport().catch((error: unknown) => {
+        logger.error({ err: error }, 'daily report failed');
+        void alertDeveloper(error);
+      });
+    },
+    { timezone: env.TZ },
+  );
+
+  logger.info(
+    { schedules, dailyReport: env.DAILY_REPORT_CRON, tz: env.TZ },
+    'scheduler started',
+  );
 }
