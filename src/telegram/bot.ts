@@ -9,6 +9,10 @@ export const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
 const processedDecisions = new Map<string, ApprovalDecision>();
 const TELEGRAM_VIDEO_LIMIT = 45 * 1024 * 1024;
 
+function isAuthorized(chatId: number | string): boolean {
+  return String(chatId) === env.TELEGRAM_ADMIN_CHAT_ID;
+}
+
 function parseCallback(data: string): { decision: ApprovalDecision; runId: string } | null {
   if (data.startsWith('approve:')) return { decision: 'approve', runId: data.slice('approve:'.length) };
   if (data.startsWith('cancel:')) return { decision: 'cancel', runId: data.slice('cancel:'.length) };
@@ -22,6 +26,44 @@ async function clearKeyboard(chatId: number, messageId: number): Promise<void> {
     logger.warn({ err: error, chatId, messageId }, 'failed to clear approval keyboard');
   }
 }
+
+// Manually triggers the pipeline on demand, e.g. via the /run command. Dynamically
+// imported to avoid a module-load cycle (pipeline.ts imports from this file too).
+async function triggerManualRun(ctx: { reply: (text: string) => Promise<unknown> }): Promise<void> {
+  const { isPipelineRunning, runPipeline } = await import('../core/pipeline.js');
+
+  if (isPipelineRunning()) {
+    await ctx.reply('⏳ A run is already in progress. Wait for it to finish before starting another.');
+    return;
+  }
+
+  await ctx.reply('🚀 Starting a new run… I will send you the video prompt shortly.');
+  runPipeline()
+    .then((runId) => {
+      logger.info({ runId }, 'manual /run pipeline finished');
+    })
+    .catch((error: unknown) => {
+      logger.error({ err: error }, 'manual /run pipeline failed');
+    });
+}
+
+bot.command('run', async (ctx) => {
+  if (!ctx.chat || !isAuthorized(ctx.chat.id)) {
+    await ctx.reply('⛔ Not authorized to trigger runs from this chat.');
+    return;
+  }
+  await triggerManualRun(ctx);
+});
+
+bot.command(['status', 'start'], async (ctx) => {
+  if (!ctx.chat || !isAuthorized(ctx.chat.id)) return;
+  const { isPipelineRunning } = await import('../core/pipeline.js');
+  await ctx.reply(
+    isPipelineRunning()
+      ? '⏳ A run is currently in progress.'
+      : 'Idle. Send /run to generate a new video prompt now.',
+  );
+});
 
 bot.callbackQuery(/^(approve|cancel):.+/, async (ctx) => {
   const parsed = parseCallback(ctx.callbackQuery.data ?? '');
