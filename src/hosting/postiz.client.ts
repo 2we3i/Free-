@@ -16,6 +16,25 @@ const http = createHttpClient('postiz', {
   timeout: 60_000,
 });
 
+export interface AnalyticsMetric {
+  label: string;
+  value: number;
+}
+
+// Fetches account-level analytics for a connected channel (views, likes, comments, etc,
+// depending on what the platform exposes). `days` controls how far back to look.
+export async function fetchAnalytics(integrationId: string, days: number): Promise<AnalyticsMetric[]> {
+  return withRetry(async () => {
+    const { data } = await http.get<AnalyticsMetric[] | { data?: AnalyticsMetric[] }>(
+      `/api/public/v1/analytics/${integrationId}`,
+      { params: { date: days } },
+    );
+    assertJsonResponse(data, '/public/v1/analytics');
+    if (Array.isArray(data)) return data;
+    return data.data ?? [];
+  }, 'postiz.analytics');
+}
+
 export interface PostizPublishResult {
   integrationId: string;
   status: 'success' | 'error';
