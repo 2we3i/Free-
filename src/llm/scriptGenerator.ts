@@ -39,6 +39,15 @@ in a single generation — not a multi-scene shot list.
 Idea:
 ${idea}
 
+Important constraints so the prompt doesn't get rejected by video-generation safety filters:
+- Do not name real, currently-serving political leaders, real ongoing conflicts, wars, sanctions,
+  or specific geopolitical events/routes as if depicting real current events.
+- Do not depict real named private individuals.
+- Keep any real-world reference light, generic, and clearly non-factual/illustrative rather than
+  a dramatized recreation of a specific real situation.
+- Prefer generic characters, settings, and stylized/animated visuals over photorealistic
+  recreations of real people or real specific events.
+
 Return ONLY valid JSON (no markdown, no commentary) with this shape:
 {
   "idea": "one-sentence restatement of the concept",
