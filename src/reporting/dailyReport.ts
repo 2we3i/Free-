@@ -1,3 +1,4 @@
+import { CHANNELS } from '../channels/channels.js';
 import { env } from '../config/env.js';
 import { getTodaysDoneRuns } from '../db/sheets.client.js';
 import { fetchAnalytics } from '../hosting/postiz.client.js';
@@ -5,8 +6,8 @@ import { logger } from '../core/logger.js';
 import { bot } from '../telegram/bot.js';
 
 // Postiz's analytics endpoint reports account-level metrics for the lookback window,
-// not strictly per-post — but since we only care about "how did today's posts do"
-// and posts publish once a day per network here, a 1-day lookback is a reasonable proxy.
+// not strictly per-post — but since each channel publishes at most a few times a day,
+// a 1-day lookback is a reasonable proxy for "how did today's post(s) do".
 const ANALYTICS_LOOKBACK_DAYS = 1;
 
 function formatMetrics(metrics: Array<{ label: string; value: number }>): string {
@@ -23,35 +24,16 @@ export async function sendDailyReport(): Promise<void> {
     return;
   }
 
-  const integrationIds = Array.from(
-    new Set(
-      env.POSTIZ_ACTIVE_NETWORKS.split(',')
-        .map((n) => n.trim().toLowerCase())
-        .map((network) => {
-          switch (network) {
-            case 'youtube':
-              return env.POSTIZ_INTEGRATION_YOUTUBE;
-            case 'tiktok':
-              return env.POSTIZ_INTEGRATION_TIKTOK;
-            case 'instagram':
-              return env.POSTIZ_INTEGRATION_INSTAGRAM;
-            default:
-              return '';
-          }
-        })
-        .filter(Boolean),
-    ),
-  );
-
   const sections: string[] = [`📊 Daily report — ${runs.length} video(s) published today`, ''];
 
-  for (const integrationId of integrationIds) {
+  for (const channel of CHANNELS) {
+    if (!channel.postizIntegrationId) continue;
     try {
-      const metrics = await fetchAnalytics(integrationId, ANALYTICS_LOOKBACK_DAYS);
-      sections.push(`Channel ${integrationId}:`, formatMetrics(metrics), '');
+      const metrics = await fetchAnalytics(channel.postizIntegrationId, ANALYTICS_LOOKBACK_DAYS);
+      sections.push(`${channel.label}:`, formatMetrics(metrics), '');
     } catch (error) {
-      logger.error({ err: error, integrationId }, 'failed to fetch analytics for daily report');
-      sections.push(`Channel ${integrationId}: ⚠️ failed to fetch analytics`, '');
+      logger.error({ err: error, channel: channel.id }, 'failed to fetch analytics for daily report');
+      sections.push(`${channel.label}: ⚠️ failed to fetch analytics`, '');
     }
   }
 
