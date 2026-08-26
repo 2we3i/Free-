@@ -1,36 +1,45 @@
 import cron from 'node-cron';
+import { CHANNELS } from '../channels/channels.js';
 import { env } from '../config/env.js';
-import { isPipelineRunning, runPipeline } from '../core/pipeline.js';
+import { isChannelRunning, runChannelPipeline } from '../core/pipeline.js';
 import { logger } from '../core/logger.js';
 import { alertDeveloper } from '../telegram/alerts.js';
 import { sendDailyReport } from '../reporting/dailyReport.js';
 
-function triggerScheduledRun(schedule: string): void {
-  if (isPipelineRunning()) {
-    logger.warn({ schedule }, 'cron tick skipped because a run is already in progress');
+function triggerChannelRun(channelId: string, schedule: string): void {
+  const channel = CHANNELS.find((c) => c.id === channelId);
+  if (!channel) return;
+
+  if (isChannelRunning(channel.id)) {
+    logger.warn({ channel: channel.id, schedule }, 'cron tick skipped, channel already running');
     return;
   }
-  logger.info({ schedule }, 'cron triggered pipeline');
-  void runPipeline().catch((error: unknown) => {
-    logger.error({ err: error, schedule }, 'cron pipeline failed');
-    void alertDeveloper(error);
+  logger.info({ channel: channel.id, schedule }, 'cron triggered channel run');
+  void runChannelPipeline(channel).catch((error: unknown) => {
+    logger.error({ err: error, channel: channel.id, schedule }, 'cron channel run failed');
+    void alertDeveloper(error, channel.label);
   });
 }
 
 export function startScheduler(): void {
-  const schedules = env.CRON_SCHEDULE.split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+  for (const channel of CHANNELS) {
+    const schedules = channel.cronSchedule
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
 
-  if (schedules.length === 0) {
-    throw new Error('CRON_SCHEDULE must contain at least one cron expression');
-  }
-
-  for (const schedule of schedules) {
-    if (!cron.validate(schedule)) {
-      throw new Error(`Invalid CRON_SCHEDULE entry: "${schedule}"`);
+    if (schedules.length === 0) {
+      throw new Error(`Channel "${channel.id}" has no cron schedule configured`);
     }
-    cron.schedule(schedule, () => triggerScheduledRun(schedule), { timezone: env.TZ });
+
+    for (const schedule of schedules) {
+      if (!cron.validate(schedule)) {
+        throw new Error(`Invalid cron schedule for channel "${channel.id}": "${schedule}"`);
+      }
+      cron.schedule(schedule, () => triggerChannelRun(channel.id, schedule), { timezone: env.TZ });
+    }
+
+    logger.info({ channel: channel.id, schedules }, 'channel schedule registered');
   }
 
   if (!cron.validate(env.DAILY_REPORT_CRON)) {
@@ -48,8 +57,5 @@ export function startScheduler(): void {
     { timezone: env.TZ },
   );
 
-  logger.info(
-    { schedules, dailyReport: env.DAILY_REPORT_CRON, tz: env.TZ },
-    'scheduler started',
-  );
+  logger.info({ dailyReport: env.DAILY_REPORT_CRON, tz: env.TZ }, 'scheduler started');
 }
