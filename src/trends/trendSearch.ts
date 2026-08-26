@@ -37,16 +37,10 @@ async function searchDuckDuckGo(query: string, maxResults = 6): Promise<SearchRe
   return results;
 }
 
-// Gathers a short digest of what's currently trending in the EU and RU regions,
-// using free web search. This is passed as plain-text context into the Gemini
+// Gathers a short digest of what's currently trending, using free web search, for the
+// given set of search queries. This is passed as plain-text context into the Gemini
 // idea prompt, instead of relying on Gemini's paid search grounding tool.
-export async function fetchTrendDigest(): Promise<string> {
-  const queries = [
-    'trending memes today Europe',
-    'тренды мемы сегодня',
-    'viral trend TikTok Europe this week',
-  ];
-
+export async function fetchTrendDigest(queries: string[]): Promise<string> {
   const sections: string[] = [];
   for (const query of queries) {
     try {
@@ -63,7 +57,7 @@ export async function fetchTrendDigest(): Promise<string> {
 
   if (sections.length === 0) {
     logger.warn('all trend search queries failed, falling back to no trend context');
-    return 'No live trend data available today — use your best general knowledge of current EU/RU internet culture.';
+    return 'No live trend data available today — use your best general knowledge of this topic.';
   }
 
   return sections.join('\n\n');
