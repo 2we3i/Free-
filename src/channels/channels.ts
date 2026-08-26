@@ -34,7 +34,14 @@ export const CHANNELS: ChannelConfig[] = [
     id: 'news',
     label: 'World News',
     topicPrompt:
-      'Major world news stories from today — presented as a short, punchy, visually engaging news-style short-video summary of one real current event.',
+      'General-audience current affairs commentary. Take today\'s broad news topic/theme (economy, ' +
+      'technology, culture, science, society) and explain WHY it matters in an engaging, fast-paced ' +
+      'explainer style — like a general knowledge/educational short, not a news broadcast. Do NOT ' +
+      'frame it as a real news report, do NOT name specific real countries, real named public ' +
+      'figures, specific real ongoing conflicts, sanctions, or military/geopolitical routes/maps. ' +
+      'Keep it abstract and educational (e.g. "how global trade routes work" rather than naming a ' +
+      'specific current real-world route or conflict). The goal is an evergreen explainer inspired ' +
+      'by the news cycle, not a dramatized recreation of a real, potentially sensitive current event.',
     trendQueries: ['world news today breaking', 'top news headlines today international'],
     postizIntegrationId: env.POSTIZ_INTEGRATION_YOUTUBE_NEWS,
     cronSchedule: env.CRON_SCHEDULE_NEWS,
