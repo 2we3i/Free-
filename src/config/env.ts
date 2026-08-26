@@ -26,6 +26,12 @@ const envSchema = z.object({
   POSTIZ_INTEGRATION_INSTAGRAM: z.string().optional().default(''),
   POSTIZ_INTEGRATION_X: z.string().optional().default(''),
   POSTIZ_INTEGRATION_YOUTUBE: z.string().optional().default(''),
+  // One YouTube integration per themed channel this pipeline publishes to.
+  POSTIZ_INTEGRATION_YOUTUBE_MAIN: z.string().optional().default(''),
+  POSTIZ_INTEGRATION_YOUTUBE_NEWS: z.string().optional().default(''),
+  POSTIZ_INTEGRATION_YOUTUBE_UFC: z.string().optional().default(''),
+  POSTIZ_INTEGRATION_YOUTUBE_GAMING: z.string().optional().default(''),
+  POSTIZ_INTEGRATION_YOUTUBE_CODING: z.string().optional().default(''),
   POSTIZ_INTEGRATION_THREADS: z.string().optional().default(''),
   POSTIZ_INTEGRATION_BLUESKY: z.string().optional().default(''),
   POSTIZ_INTEGRATION_PINTEREST: z.string().optional().default(''),
@@ -40,8 +46,14 @@ const envSchema = z.object({
   GOOGLE_SHEETS_ID: z.string().min(1),
   GOOGLE_SHEETS_TAB: z.string().default('Runs'),
 
-  // Comma-separated list of cron expressions. Each one triggers a run independently.
-  CRON_SCHEDULE: z.string().default('0 12 * * *,0 17 * * *,0 21 * * *'),
+  // Each channel has its own comma-separated list of cron expressions (see channels.ts).
+  // Times are staggered across channels so all 5 don't send prompts at the exact same
+  // moment — easier to handle one clip request at a time.
+  CRON_SCHEDULE_MAIN: z.string().default('0 12 * * *,0 17 * * *,0 21 * * *'),
+  CRON_SCHEDULE_NEWS: z.string().default('20 12 * * *,20 17 * * *,20 21 * * *'),
+  CRON_SCHEDULE_UFC: z.string().default('40 12 * * *,40 17 * * *,40 21 * * *'),
+  CRON_SCHEDULE_GAMING: z.string().default('0 13 * * *,0 18 * * *,0 22 * * *'),
+  CRON_SCHEDULE_CODING: z.string().default('20 13 * * *,20 18 * * *,20 22 * * *'),
   // When to send the end-of-day analytics report (views/likes/comments) in Telegram.
   DAILY_REPORT_CRON: z.string().default('0 23 * * *'),
   TZ: z.string().default('Europe/Vilnius'),
