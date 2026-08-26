@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { ChannelConfig } from '../channels/channels.js';
 import { logger } from '../core/logger.js';
 import { fetchTrendDigest } from '../trends/trendSearch.js';
 import type { GeneratedScript } from '../types/pipeline.js';
@@ -10,18 +11,21 @@ const scriptSchema = z.object({
   videoPrompt: z.string().min(1),
 });
 
-// Turn today's trend digest (from free web search) into a short-video concept.
-function ideaPrompt(trends: string): string {
-  return `You are a short-form video creative director making content for EU and RU audiences.
+// Turn today's trend digest (from free web search) into a short-video concept for this
+// specific channel's topic focus.
+function ideaPrompt(channel: ChannelConfig, trends: string): string {
+  return `You are a short-form video creative director for a channel focused on:
+${channel.topicPrompt}
 
-Here is a digest of today's web search results about trending topics/memes in those regions:
+Here is a digest of today's web search results relevant to this channel's topic:
 ${trends}
 
-Pick the single best trend/meme suggested by this digest (or a clever combination) and turn it
-into one original short-video concept (8-15 seconds) suitable for TikTok, Reels, and Shorts.
-If the digest is thin or unclear, use your best general knowledge of current EU/RU internet
-culture instead. Return plain text only: 3-5 sentences describing the hook, the joke/reference
-being used, the visual style, and the payoff. Make it clear which specific trend/meme it's based on.`;
+Pick the single best angle/story/meme suggested by this digest (or a clever combination) and
+turn it into one original short-video concept (8-15 seconds) suitable for TikTok, Reels, YouTube
+Shorts. Stay strictly within this channel's topic focus. If the digest is thin or unclear, use
+your best general knowledge of this topic area instead. Return plain text only: 3-5 sentences
+describing the hook, the specific story/joke/reference being used, the visual style, and the
+payoff.`;
 }
 
 // Turn the idea into one self-contained prompt for a single-shot video+audio generation
@@ -38,7 +42,7 @@ ${idea}
 Return ONLY valid JSON (no markdown, no commentary) with this shape:
 {
   "idea": "one-sentence restatement of the concept",
-  "caption": "social caption with hashtags, matching the EU/RU trend referenced",
+  "caption": "social caption with hashtags matching the topic and reference used",
   "videoPrompt": "one detailed, self-contained prompt describing the full 8-15s clip: setting, action, camera, dialogue/sound, tone, and pacing — written so it can be pasted directly into a video generator"
 }`;
 }
@@ -54,14 +58,14 @@ function extractJson(text: string): unknown {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-export async function generateScript(): Promise<GeneratedScript> {
+export async function generateScriptForChannel(channel: ChannelConfig): Promise<GeneratedScript> {
   const gemini = new GeminiProvider();
 
-  const trends = await fetchTrendDigest();
-  logger.info({ trends }, 'fetched current EU/RU trend digest via free web search');
+  const trends = await fetchTrendDigest(channel.trendQueries);
+  logger.info({ channel: channel.id, trends }, 'fetched trend digest for channel');
 
-  const idea = await gemini.generate(ideaPrompt(trends));
-  logger.info({ idea }, 'idea generated from trends');
+  const idea = await gemini.generate(ideaPrompt(channel, trends));
+  logger.info({ channel: channel.id, idea }, 'idea generated for channel');
 
   const raw = await gemini.generate(videoPromptPrompt(idea));
   const parsed = scriptSchema.parse(extractJson(raw));
