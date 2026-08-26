@@ -71,4 +71,22 @@ export async function uploadAndPublish(
   return { ...published, mediaId: media.id };
 }
 
+// Publishes to exactly one Postiz integration (used by the multi-channel pipeline,
+// where each channel has its own dedicated YouTube integration id).
+export async function uploadAndPublishToIntegration(
+  buffer: Buffer,
+  caption: string,
+  filename: string,
+  integrationId: string,
+): Promise<{ link?: string; error?: string; mediaId: string }> {
+  const media = await uploadToPostiz(buffer, filename);
+  const results = await publishViaPostiz(media, caption, [integrationId]);
+  const result = results[0];
+
+  if (!result || result.status !== 'success' || !result.postUrl) {
+    return { error: result?.error ?? 'Postiz integration publish failed', mediaId: media.id };
+  }
+  return { link: result.postUrl, mediaId: media.id };
+}
+
 export { INTEGRATION_MAP, PLATFORMS };
