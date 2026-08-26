@@ -75,35 +75,24 @@ if (!parsed.success) {
 
 export const env: Env = parsed.data;
 
-const INTEGRATION_ENV_KEYS = {
-  tiktok: 'POSTIZ_INTEGRATION_TIKTOK',
-  linkedin: 'POSTIZ_INTEGRATION_LINKEDIN',
-  facebook: 'POSTIZ_INTEGRATION_FACEBOOK',
-  instagram: 'POSTIZ_INTEGRATION_INSTAGRAM',
-  x: 'POSTIZ_INTEGRATION_X',
-  youtube: 'POSTIZ_INTEGRATION_YOUTUBE',
-  threads: 'POSTIZ_INTEGRATION_THREADS',
-  bluesky: 'POSTIZ_INTEGRATION_BLUESKY',
-  pinterest: 'POSTIZ_INTEGRATION_PINTEREST',
+// Each channel needs its own YouTube integration id configured. This check runs here
+// (rather than in channels.ts) so a missing id fails fast at startup with a clear message.
+const CHANNEL_INTEGRATION_VARS = {
+  main: 'POSTIZ_INTEGRATION_YOUTUBE_MAIN',
+  news: 'POSTIZ_INTEGRATION_YOUTUBE_NEWS',
+  ufc: 'POSTIZ_INTEGRATION_YOUTUBE_UFC',
+  gaming: 'POSTIZ_INTEGRATION_YOUTUBE_GAMING',
+  coding: 'POSTIZ_INTEGRATION_YOUTUBE_CODING',
 } as const;
 
-export const activeNetworks = env.POSTIZ_ACTIVE_NETWORKS.split(',')
-  .map((s) => s.trim().toLowerCase())
-  .filter(Boolean);
+const missingChannelIntegrations = Object.entries(CHANNEL_INTEGRATION_VARS).filter(
+  ([, key]) => !env[key as keyof Env],
+);
 
-const missingIntegrationIds = activeNetworks.filter((network) => {
-  const key = INTEGRATION_ENV_KEYS[network as keyof typeof INTEGRATION_ENV_KEYS];
-  if (!key) {
-    console.error(`Unknown network "${network}" in POSTIZ_ACTIVE_NETWORKS`);
-    process.exit(1);
-  }
-  return !env[key as keyof Env];
-});
-
-if (missingIntegrationIds.length > 0) {
+if (missingChannelIntegrations.length > 0) {
   console.error(
-    'Missing Postiz integration IDs for active networks:\n' +
-      missingIntegrationIds.map((n) => `${n}: set ${INTEGRATION_ENV_KEYS[n as keyof typeof INTEGRATION_ENV_KEYS]}`).join('\n'),
+    'Missing Postiz integration IDs for these channels:\n' +
+      missingChannelIntegrations.map(([channel, key]) => `${channel}: set ${key}`).join('\n'),
   );
   process.exit(1);
 }
