@@ -1,5 +1,5 @@
 import { logger } from './core/logger.js';
-import { runPipeline } from './core/pipeline.js';
+import { runAllChannels } from './core/pipeline.js';
 import { startScheduler } from './scheduler/cron.js';
 import { alertDeveloper } from './telegram/alerts.js';
 import { bot } from './telegram/bot.js';
@@ -37,8 +37,8 @@ async function runOnce(): Promise<void> {
   installProcessHandlers();
   await startBot();
   try {
-    const runId = await runPipeline();
-    logger.info({ runId }, 'manual run finished');
+    const summary = await runAllChannels();
+    logger.info({ summary }, 'manual run finished');
   } finally {
     await bot.stop();
   }
