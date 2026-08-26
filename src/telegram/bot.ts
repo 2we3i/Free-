@@ -27,24 +27,45 @@ async function clearKeyboard(chatId: number, messageId: number): Promise<void> {
   }
 }
 
-// Manually triggers the pipeline on demand, e.g. via the /run command. Dynamically
-// imported to avoid a module-load cycle (pipeline.ts imports from this file too).
-async function triggerManualRun(ctx: { reply: (text: string) => Promise<unknown> }): Promise<void> {
-  const { isPipelineRunning, runPipeline } = await import('../core/pipeline.js');
+// Manually triggers a run on demand via /run (all channels) or /run <channel_id>
+// (a single channel). Dynamically imported to avoid a module-load cycle (pipeline.ts
+// imports from this file too).
+async function triggerManualRun(
+  ctx: { reply: (text: string) => Promise<unknown> },
+  channelId?: string,
+): Promise<void> {
+  const { CHANNELS } = await import('../channels/channels.js');
+  const { isChannelRunning, runChannelPipeline, runAllChannels } = await import('../core/pipeline.js');
 
-  if (isPipelineRunning()) {
-    await ctx.reply('⏳ A run is already in progress. Wait for it to finish before starting another.');
+  if (!channelId) {
+    const busy = CHANNELS.filter((c) => isChannelRunning(c.id));
+    if (busy.length > 0) {
+      await ctx.reply(`⏳ Already running: ${busy.map((c) => c.label).join(', ')}. Wait or run a specific channel.`);
+      return;
+    }
+    await ctx.reply(`🚀 Starting all ${CHANNELS.length} channels… prompts incoming shortly.`);
+    runAllChannels()
+      .then((summary) => logger.info({ summary }, 'manual /run (all channels) finished'))
+      .catch((error: unknown) => logger.error({ err: error }, 'manual /run (all channels) failed'));
     return;
   }
 
-  await ctx.reply('🚀 Starting a new run… I will send you the video prompt shortly.');
-  runPipeline()
-    .then((runId) => {
-      logger.info({ runId }, 'manual /run pipeline finished');
-    })
-    .catch((error: unknown) => {
-      logger.error({ err: error }, 'manual /run pipeline failed');
-    });
+  const channel = CHANNELS.find((c) => c.id === channelId);
+  if (!channel) {
+    await ctx.reply(
+      `Unknown channel "${channelId}". Available: ${CHANNELS.map((c) => c.id).join(', ')}`,
+    );
+    return;
+  }
+  if (isChannelRunning(channel.id)) {
+    await ctx.reply(`⏳ ${channel.label} is already running.`);
+    return;
+  }
+
+  await ctx.reply(`🚀 Starting ${channel.label}… prompt incoming shortly.`);
+  runChannelPipeline(channel)
+    .then((result) => logger.info({ result }, 'manual /run (single channel) finished'))
+    .catch((error: unknown) => logger.error({ err: error, channel: channel.id }, 'manual /run (single channel) failed'));
 }
 
 bot.command('run', async (ctx) => {
@@ -52,17 +73,22 @@ bot.command('run', async (ctx) => {
     await ctx.reply('⛔ Not authorized to trigger runs from this chat.');
     return;
   }
-  await triggerManualRun(ctx);
+  const arg = ctx.match?.toString().trim();
+  await triggerManualRun(ctx, arg || undefined);
 });
 
 bot.command(['status', 'start'], async (ctx) => {
   if (!ctx.chat || !isAuthorized(ctx.chat.id)) return;
-  const { isPipelineRunning } = await import('../core/pipeline.js');
-  await ctx.reply(
-    isPipelineRunning()
-      ? '⏳ A run is currently in progress.'
-      : 'Idle. Send /run to generate a new video prompt now, or /report for today\'s stats.',
-  );
+  const { CHANNELS } = await import('../channels/channels.js');
+  const { getRunningChannels } = await import('../core/pipeline.js');
+  const running = getRunningChannels();
+  const lines = [
+    running.length > 0 ? `⏳ Currently running: ${running.join(', ')}` : 'Idle.',
+    '',
+    'Commands: /run (all channels), /run <id> (one channel), /report (today\'s stats).',
+    `Channels: ${CHANNELS.map((c) => c.id).join(', ')}`,
+  ];
+  await ctx.reply(lines.join('\n'));
 });
 
 bot.command('report', async (ctx) => {
@@ -155,7 +181,11 @@ bot.on(['message:video', 'message:document'], async (ctx) => {
       return;
     }
 
-    await ctx.reply(`✅ Clip received for run ${result.runId}. Continuing…`);
+    await ctx.reply(
+      result.remaining > 0
+        ? `✅ Clip received for run ${result.runId}. ${result.remaining} more clip(s) still expected.`
+        : `✅ Clip received for run ${result.runId}. That was the last one — continuing…`,
+    );
   } catch (error) {
     logger.error({ err: error, chatId }, 'failed to process incoming clip');
     await ctx.reply('Something went wrong saving that clip — please try sending it again.');
@@ -168,21 +198,27 @@ bot.catch((err) => {
 
 // Sends the single video-generation prompt to the operator so they can paste it into
 // a tool like the Gemini app and reply with the resulting clip (video + native audio).
-export async function sendVideoPrompt(runId: string, videoPrompt: string): Promise<void> {
+export async function sendVideoPrompt(
+  runId: string,
+  channelLabel: string,
+  videoPrompt: string,
+): Promise<void> {
   const text = [
-    `🎬 Run ${runId}`,
+    `🎬 [${channelLabel}] Run ${runId}`,
     '',
     'Paste this into the video generator (e.g. Gemini app → Video):',
     '',
     videoPrompt,
     '',
-    `Reply here with the finished clip. You have up to ${Math.round(env.MANUAL_CLIP_TIMEOUT_MS / 60_000)} minutes.`,
+    `Reply here with the finished clip, in order (clips are matched to runs in the order prompts were sent).`,
+    `You have up to ${Math.round(env.MANUAL_CLIP_TIMEOUT_MS / 60_000)} minutes.`,
   ].join('\n');
   await bot.api.sendMessage(env.TELEGRAM_ADMIN_CHAT_ID, text);
 }
 
 export async function sendApprovalRequest(options: {
   runId: string;
+  channelLabel: string;
   idea: string;
   caption: string;
   videoBuffer: Buffer;
@@ -192,7 +228,7 @@ export async function sendApprovalRequest(options: {
     .text('❌ Отмена', `cancel:${options.runId}`);
 
   const text = [
-    `Run_ID: ${options.runId}`,
+    `[${options.channelLabel}] Run_ID: ${options.runId}`,
     '',
     options.idea,
     '',
